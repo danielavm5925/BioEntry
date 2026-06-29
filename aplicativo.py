@@ -339,6 +339,27 @@ def admin_agregar():
         os.remove(ruta_foto)
         return jsonify({"ok": False, "error": "El usuario ya existe"}), 409
 
+    # Validar que la foto SÍ tenga un rostro detectable antes de aceptarla
+    try:
+        test_objs = DeepFace.represent(
+            img_path=ruta_foto,
+            model_name="ArcFace",
+            detector_backend="retinaface",
+            enforce_detection=True
+        )
+    except Exception:
+        test_objs = None
+
+    if not test_objs:
+        # Revertir: la foto no sirve, no dejamos al usuario registrado a medias
+        cursor.execute("DELETE FROM usuarios WHERE archivo = ?", (nombre_archivo,))
+        conn.commit()
+        os.remove(ruta_foto)
+        return jsonify({
+            "ok": False,
+            "error": "No se detectó ningún rostro en la foto. Intenta con otra imagen, de frente y con buena iluminación."
+        }), 422
+
     load_embeddings()
     return jsonify({"ok": True, "archivo": nombre_archivo})
 
