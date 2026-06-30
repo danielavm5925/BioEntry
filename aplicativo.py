@@ -153,7 +153,7 @@ def generate_frames():
                     if sim > 0.15:
                         print(f"Similitud: {sim:.4f}  |  {labels[I[0][0]]}")
                     else:
-                        print(f"Similitud: {sim:.4f}  |  (falsa alarma del detector, no hay nadie)")
+                        print(f"falsa alarma del detector, no hay nadie")
 
                     if sim > THRESHOLD:
                         name = labels[I[0][0]]
@@ -333,8 +333,17 @@ def admin_agregar():
 
     if not all([nombre, codigo, rol, programa, foto]):
         return jsonify({"ok": False, "error": "Faltan campos"}), 400
+    
+    # Validar código duplicado 
+    cursor.execute("SELECT nombre FROM usuarios WHERE codigo = ?", (codigo,))
+    existente = cursor.fetchone()
+    if existente:
+        return jsonify({
+            "ok": False,
+            "error": f"El código {codigo} ya está registrado para {existente[0]}."
+        }), 409
 
-# Nombre de archivo basado en el código (sin tildes, espacios ni caracteres especiales)
+    # Nombre de archivo basado en el código (sin tildes, espacios ni caracteres especiales)
     codigo_limpio = normalizar_texto(codigo)
     nombre_limpio = normalizar_texto(nombre)
     nombre_archivo = f"{codigo_limpio}_{nombre_limpio}" + os.path.splitext(foto.filename)[1].lower()

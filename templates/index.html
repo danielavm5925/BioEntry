@@ -251,13 +251,30 @@
 
         <div class="modal-error hidden" id="agregar-error"></div>
         <div class="modal-success hidden" id="agregar-ok">✓ Usuario agregado correctamente. Embeddings recargados.</div>
+
+        <!-- RESUMEN DE CONFIRMACIÓN -->
+        <div class="modal-confirm hidden" id="agregar-confirm">
+          <p class="modal-desc" style="margin-bottom:10px;"><strong>Verifica los datos antes de guardar:</strong></p>
+          <div class="confirm-row"><strong>Nombre:</strong> <span id="confirm-nombre"></span></div>
+          <div class="confirm-row"><strong>Código:</strong> <span id="confirm-codigo"></span></div>
+          <div class="confirm-row"><strong>Rol:</strong> <span id="confirm-rol"></span></div>
+          <div class="confirm-row"><strong>Programa:</strong> <span id="confirm-programa"></span></div>
+        </div>
       </div>
 
-      <div class="modal-footer">
+      <div class="modal-footer" id="footer-agregar-normal">
         <button class="btn-secondary" id="agregar-reset">Limpiar</button>
         <button class="btn-primary"   id="agregar-submit">
           <span id="agregar-btn-text">Guardar usuario</span>
           <span class="btn-spinner hidden" id="agregar-spinner"></span>
+        </button>
+      </div>
+
+      <div class="modal-footer hidden" id="footer-agregar-confirm">
+        <button class="btn-secondary" id="confirm-cancelar">Editar datos</button>
+        <button class="btn-primary"   id="confirm-aceptar">
+          <span id="confirm-btn-text">Confirmar y guardar</span>
+          <span class="btn-spinner hidden" id="confirm-spinner"></span>
         </button>
       </div>
     </div>

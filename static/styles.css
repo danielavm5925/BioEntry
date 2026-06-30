@@ -973,3 +973,15 @@ aside {
   white-space: nowrap;
 }
 .btn-delete:hover { background: #f5c6c2; }
+
+.modal-confirm         { display: block; }
+.modal-confirm.hidden  { display: none;  }
+.confirm-row {
+  font-size: 13px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.confirm-row strong { color: var(--ink-m); margin-right: 6px; }
+.modal-footer.hidden      { display: none; }
+.photo-upload-area.hidden { display: none; }
+.fields-grid.hidden       { display: none; }  
