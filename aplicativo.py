@@ -150,7 +150,10 @@ def generate_frames():
                     sim    = float(D[0][0])
                     conf   = round(sim * 100, 2)
 
-                    print(f"Similitud: {sim:.4f}  |  {labels[I[0][0]]}")
+                    if sim > 0.15:
+                        print(f"Similitud: {sim:.4f}  |  {labels[I[0][0]]}")
+                    else:
+                        print(f"Similitud: {sim:.4f}  |  (falsa alarma del detector, no hay nadie)")
 
                     if sim > THRESHOLD:
                         name = labels[I[0][0]]
