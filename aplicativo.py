@@ -9,15 +9,22 @@ from datetime import datetime
 import shutil
 import logging
 import unicodedata
+import threading
 
 
 app = Flask(__name__)
 
-#OCULTAR SPAM DE REQUESTS FLASK
+# ============================================
+# OCULTAR SPAM DE REQUESTS FLASK
+# ============================================
+
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-#SQLITE
+# ============================================
+# SQLITE
+# ============================================
+
 conn = sqlite3.connect("usuarios.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -33,19 +40,29 @@ CREATE TABLE IF NOT EXISTS accesos (
 """)
 conn.commit()
 
-#Config
+# ============================================
+# CONFIG
+# ============================================
+
 DB_PATH   = "database"
 THRESHOLD = 0.6
 
-#Estado global de los embeddings
+# ============================================
+# ESTADO GLOBAL DE EMBEDDINGS
+# ============================================
+
 embeddings_store = {
     "embeddings": None,
     "labels":     [],
     "index":      None
 }
 
+# ============================================
+# CARGAR EMBEDDINGS — reconstruye desde cero
+# ============================================
+
 def load_embeddings():
-    """Carga (o recarga) embeddings desde la carpeta database/."""
+    """Reconstruye el índice FAISS completo desde cero."""
     embeddings = []
     labels     = []
 
@@ -64,17 +81,18 @@ def load_embeddings():
                 detector_backend  = "retinaface",
                 enforce_detection = False
             )
-
             if objs:
                 embeddings.append(objs[0]["embedding"])
                 labels.append(os.path.splitext(file)[0])
                 print(f"  ✓ {os.path.splitext(file)[0]}")
-
         except Exception as e:
             print("  Error:", e)
 
     if not embeddings:
         print("⚠️  No se cargaron embeddings.")
+        embeddings_store["embeddings"] = None
+        embeddings_store["labels"]     = []
+        embeddings_store["index"]      = None
         return
 
     emb_arr = np.array(embeddings).astype("float32")
@@ -89,24 +107,72 @@ def load_embeddings():
 
     print(f"FAISS listo — {len(labels)} persona(s)")
 
+
+# ============================================
+# AGREGAR EMBEDDING
+# ============================================
+
+def agregar_embedding(ruta_foto, label):
+    """Agrega un solo embedding al índice existente.
+    Si el índice aún no existe (primer usuario), lo crea."""
+    try:
+        objs = DeepFace.represent(
+            img_path          = ruta_foto,
+            model_name        = "ArcFace",
+            detector_backend  = "retinaface",
+            enforce_detection = False
+        )
+        if not objs:
+            return False
+
+        vec = np.array([objs[0]["embedding"]]).astype("float32")
+        faiss.normalize_L2(vec)
+
+        # Si el índice no existe aún (base vacía al arrancar), crearlo ahora
+        if embeddings_store["index"] is None:
+            idx = faiss.IndexFlatIP(vec.shape[1])
+            idx.add(vec)
+            embeddings_store["index"]  = idx
+            embeddings_store["labels"] = [label]
+        else:
+            embeddings_store["index"].add(vec)
+            embeddings_store["labels"].append(label)
+
+        print(f"  ✓ Embedding agregado: {label}")
+        return True
+
+    except Exception as e:
+        print(f"  Error agregando embedding: {e}")
+        return False
+
+
 load_embeddings()
 
-#Métricas
+# ============================================
+# MÉTRICAS
+# ============================================
+
 metrics = {
     "total_ok":   0,
     "total_deny": 0
 }
 
-#Cámara
+# ============================================
+# CÁMARA
+# ============================================
+
 camera = cv2.VideoCapture(0)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-face_data     = {"detected": False}
-_last_logged  = {"name": None, "ts": 0}
+face_data      = {"detected": False}
+_last_logged   = {"name": None, "ts": 0}
 current_person = None
 
-#Video stream
+# ============================================
+# VIDEO STREAM
+# ============================================
+
 def generate_frames():
     global face_data
     global current_person
@@ -133,7 +199,7 @@ def generate_frames():
                 labels = embeddings_store["labels"]
 
                 if not objs or index is None:
-                    face_data = {"detected": False}
+                    face_data      = {"detected": False}
                     current_person = None
                 else:
                     obj         = objs[0]
@@ -146,14 +212,12 @@ def generate_frames():
                     vec = np.array([embedding]).astype("float32")
                     faiss.normalize_L2(vec)
 
-                    D, I   = index.search(vec, 1)
-                    sim    = float(D[0][0])
-                    conf   = round(sim * 100, 2)
+                    D, I  = index.search(vec, 1)
+                    sim   = float(D[0][0])
+                    conf  = round(sim * 100, 2)
 
                     if sim > 0.15:
                         print(f"Similitud: {sim:.4f}  |  {labels[I[0][0]]}")
-                    else:
-                        print(f"falsa alarma del detector, no hay nadie")
 
                     if sim > THRESHOLD:
                         name = labels[I[0][0]]
@@ -197,7 +261,7 @@ def generate_frames():
                                 _log_access("Desconocido", "N/A", "denegado", conf)
                                 current_person = "Desconocido"
                         else:
-                            face_data = {"detected": False}
+                            face_data      = {"detected": False}
                             current_person = None
 
             except Exception as e:
@@ -215,7 +279,10 @@ def generate_frames():
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" +
                buffer.tobytes() + b"\r\n")
 
-#Helper log de acceso
+# ============================================
+# HELPER: LOG DE ACCESO
+# ============================================
+
 def _log_access(nombre, codigo, resultado, confianza):
     now = datetime.now().timestamp()
     if _last_logged["name"] == nombre and (now - _last_logged["ts"]) < 5:
@@ -232,7 +299,10 @@ def _log_access(nombre, codigo, resultado, confianza):
     else:
         metrics["total_deny"] += 1
 
-#Rutas - vistas
+# ============================================
+# RUTAS — VISTAS
+# ============================================
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -292,7 +362,10 @@ def get_metrics():
         "history":    history
     })
 
-#Rutas - Admin
+# ============================================
+# RUTAS — ADMIN
+# ============================================
+
 ADMIN_PASSWORD = "uao2026"
 
 @app.route("/admin/login", methods=["POST"])
@@ -315,13 +388,13 @@ def admin_usuarios():
         for r in rows
     ])
 
+
 def normalizar_texto(texto):
     """Quita tildes/diacríticos y caracteres no-ASCII, deja solo letras/números."""
-    # Descompone caracteres acentuados (á -> a + tilde) y descarta la tilde
-    nfkd = unicodedata.normalize('NFKD', texto)
+    nfkd      = unicodedata.normalize('NFKD', texto)
     sin_tildes = ''.join(c for c in nfkd if not unicodedata.combining(c))
-    # Deja solo letras y números (sin espacios ni símbolos)
     return ''.join(c for c in sin_tildes if c.isalnum())
+
 
 @app.route("/admin/agregar", methods=["POST"])
 def admin_agregar():
@@ -333,8 +406,8 @@ def admin_agregar():
 
     if not all([nombre, codigo, rol, programa, foto]):
         return jsonify({"ok": False, "error": "Faltan campos"}), 400
-    
-    # Validar código duplicado 
+
+    # Validar código duplicado
     cursor.execute("SELECT nombre FROM usuarios WHERE codigo = ?", (codigo,))
     existente = cursor.fetchone()
     if existente:
@@ -343,9 +416,9 @@ def admin_agregar():
             "error": f"El código {codigo} ya está registrado para {existente[0]}."
         }), 409
 
-    # Nombre de archivo basado en el código (sin tildes, espacios ni caracteres especiales)
-    codigo_limpio = normalizar_texto(codigo)
-    nombre_limpio = normalizar_texto(nombre)
+    # Nombre de archivo: código + nombre, sin caracteres especiales
+    codigo_limpio  = normalizar_texto(codigo)
+    nombre_limpio  = normalizar_texto(nombre)
     nombre_archivo = f"{codigo_limpio}_{nombre_limpio}" + os.path.splitext(foto.filename)[1].lower()
     ruta_foto      = os.path.join(DB_PATH, nombre_archivo)
 
@@ -362,20 +435,19 @@ def admin_agregar():
         os.remove(ruta_foto)
         return jsonify({"ok": False, "error": "El usuario ya existe"}), 409
 
-    # Validar que la foto SÍ tenga un rostro detectable antes de aceptarla
+    # Validar que la foto tenga un rostro detectable (opencv: rápido)
     try:
         test_objs = DeepFace.represent(
-            img_path=ruta_foto,
-            model_name="ArcFace",
-            detector_backend="retinaface",
-            enforce_detection=True
+            img_path          = ruta_foto,
+            model_name        = "ArcFace",
+            detector_backend  = "opencv",
+            enforce_detection = True
         )
     except Exception as e:
         print(f"Error validando rostro: {e}")
         test_objs = None
 
     if not test_objs:
-        # Revertir: la foto no sirve, no dejamos al usuario registrado a medias
         cursor.execute("DELETE FROM usuarios WHERE archivo = ?", (nombre_archivo,))
         conn.commit()
         os.remove(ruta_foto)
@@ -384,7 +456,20 @@ def admin_agregar():
             "error": "No se detectó ningún rostro en la foto. Intenta con otra imagen, de frente y con buena iluminación."
         }), 422
 
-    load_embeddings()
+    # Reutilizar el embedding ya calculado — sin segundo procesamiento
+    label = os.path.splitext(nombre_archivo)[0]
+    vec   = np.array([test_objs[0]["embedding"]]).astype("float32")
+    faiss.normalize_L2(vec)
+
+    if embeddings_store["index"] is None:
+        idx = faiss.IndexFlatIP(vec.shape[1])
+        idx.add(vec)
+        embeddings_store["index"]  = idx
+        embeddings_store["labels"] = [label]
+    else:
+        embeddings_store["index"].add(vec)
+        embeddings_store["labels"].append(label)
+
     return jsonify({"ok": True, "archivo": nombre_archivo})
 
 
@@ -404,10 +489,10 @@ def admin_eliminar(uid):
     cursor.execute("DELETE FROM usuarios WHERE id = ?", (uid,))
     conn.commit()
 
-    load_embeddings()
+    # Recarga inmediata
+    threading.Thread(target=load_embeddings, daemon=True).start()
     return jsonify({"ok": True})
 
-
-#run
+# RUN
 if __name__ == "__main__":
     app.run(debug=True)
