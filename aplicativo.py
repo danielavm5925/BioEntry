@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 import shutil
 import logging
+import unicodedata
 
 
 app = Flask(__name__)
@@ -311,6 +312,13 @@ def admin_usuarios():
         for r in rows
     ])
 
+def normalizar_texto(texto):
+    """Quita tildes/diacríticos y caracteres no-ASCII, deja solo letras/números."""
+    # Descompone caracteres acentuados (á -> a + tilde) y descarta la tilde
+    nfkd = unicodedata.normalize('NFKD', texto)
+    sin_tildes = ''.join(c for c in nfkd if not unicodedata.combining(c))
+    # Deja solo letras y números (sin espacios ni símbolos)
+    return ''.join(c for c in sin_tildes if c.isalnum())
 
 @app.route("/admin/agregar", methods=["POST"])
 def admin_agregar():
@@ -323,7 +331,10 @@ def admin_agregar():
     if not all([nombre, codigo, rol, programa, foto]):
         return jsonify({"ok": False, "error": "Faltan campos"}), 400
 
-    nombre_archivo = nombre.replace(" ", "") + os.path.splitext(foto.filename)[1]
+# Nombre de archivo basado en el código (sin tildes, espacios ni caracteres especiales)
+    codigo_limpio = normalizar_texto(codigo)
+    nombre_limpio = normalizar_texto(nombre)
+    nombre_archivo = f"{codigo_limpio}_{nombre_limpio}" + os.path.splitext(foto.filename)[1].lower()
     ruta_foto      = os.path.join(DB_PATH, nombre_archivo)
 
     foto.save(ruta_foto)
@@ -347,7 +358,8 @@ def admin_agregar():
             detector_backend="retinaface",
             enforce_detection=True
         )
-    except Exception:
+    except Exception as e:
+        print(f"Error validando rostro: {e}")
         test_objs = None
 
     if not test_objs:
