@@ -435,26 +435,6 @@ def admin_agregar():
         os.remove(ruta_foto)
         return jsonify({"ok": False, "error": "El usuario ya existe"}), 409
 
-    # Validar que la foto tenga un rostro detectable (opencv: rápido)
-    try:
-        test_objs = DeepFace.represent(
-            img_path          = ruta_foto,
-            model_name        = "ArcFace",
-            detector_backend  = "opencv",
-            enforce_detection = True
-        )
-    except Exception as e:
-        print(f"Error validando rostro: {e}")
-        test_objs = None
-
-    if not test_objs:
-        cursor.execute("DELETE FROM usuarios WHERE archivo = ?", (nombre_archivo,))
-        conn.commit()
-        os.remove(ruta_foto)
-        return jsonify({
-            "ok": False,
-            "error": "No se detectó ningún rostro en la foto. Intenta con otra imagen, de frente y con buena iluminación."
-        }), 422
 
     # Validación con OpenCV pasó — calcular embedding de calidad en segundo plano
     # No usamos el embedding de OpenCV en FAISS para evitar falsos reconocimientos
