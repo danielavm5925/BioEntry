@@ -456,19 +456,14 @@ def admin_agregar():
             "error": "No se detectó ningún rostro en la foto. Intenta con otra imagen, de frente y con buena iluminación."
         }), 422
 
-    # Reutilizar el embedding ya calculado — sin segundo procesamiento
+    # Validación con OpenCV pasó — calcular embedding de calidad en segundo plano
+    # No usamos el embedding de OpenCV en FAISS para evitar falsos reconocimientos
     label = os.path.splitext(nombre_archivo)[0]
-    vec   = np.array([test_objs[0]["embedding"]]).astype("float32")
-    faiss.normalize_L2(vec)
-
-    if embeddings_store["index"] is None:
-        idx = faiss.IndexFlatIP(vec.shape[1])
-        idx.add(vec)
-        embeddings_store["index"]  = idx
-        embeddings_store["labels"] = [label]
-    else:
-        embeddings_store["index"].add(vec)
-        embeddings_store["labels"].append(label)
+    threading.Thread(
+        target=agregar_embedding,
+        args=(ruta_foto, label),
+        daemon=True
+    ).start()
 
     return jsonify({"ok": True, "archivo": nombre_archivo})
 
@@ -489,7 +484,13 @@ def admin_eliminar(uid):
     cursor.execute("DELETE FROM usuarios WHERE id = ?", (uid,))
     conn.commit()
 
-    # Recarga inmediata
+    # Eliminar el label del índice en memoria inmediatamente
+    # para que el sistema deje de reconocer a esa persona al instante
+    label = os.path.splitext(archivo)[0]
+    if label in embeddings_store["labels"]:
+        embeddings_store["labels"].remove(label)
+
+    # Reconstruir el índice completo en segundo plano
     threading.Thread(target=load_embeddings, daemon=True).start()
     return jsonify({"ok": True})
 
